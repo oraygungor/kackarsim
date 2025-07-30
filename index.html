@@ -152,11 +152,11 @@
                     <summary>Detaylı Ayarlar</summary>
                     <div>
                         <div class="form-group">
-                           <label for="fatigue-factor">Her 15 "Ayarlanmış KM"de Performans Düşüşü:</label>
+                           <label for="fatigue-factor">Her 10 "Ayarlanmış KM"de Performans Düşüşü:</label>
                            <div class="description">(Ayarlanmış KM = Mesafe(km) + Tırmanış(m)/100)</div>
                            <div class="slider-container" style="margin-top: 5px;">
-                               <input type="range" id="fatigue-factor" value="8" min="0" max="50">
-                               <span id="fatigue-display">8%</span>
+                               <input type="range" id="fatigue-factor" value="5" min="0" max="50">
+                               <span id="fatigue-display">5%</span>
                            </div>
                         </div>
                         <div class="form-group">
@@ -292,7 +292,7 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
     race_points = [p for t in gpx.tracks for s in t.segments for p in s.points]
     if not race_points: return "GPX dosyasında geçerli rota noktası bulunamadı.", go.Figure().to_json(), "[]", "{}"
     start_datetime = datetime.combine(date.today(), datetime.strptime(start_time_str, '%H:%M').time())
-    adjusted_km_fatigue_step = 15.0
+    adjusted_km_fatigue_step = 10.0
     last_adjusted_km_milestone = 0
     fatigue_factor = 1.0
     perf_model = np.poly1d(poly_coeffs)
