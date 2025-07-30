@@ -67,26 +67,19 @@
         #result-table th { background-color: #f2f2f2; font-weight: bold; }
         #result-table td:first-child, #result-table th:first-child { text-align: left; }
         
-        /* --- MOBIL UYUMLULUK --- */
         @media (max-width: 768px) {
             body { padding: 5px; }
             .box { padding: 15px; }
             h1 { font-size: 1.6em; }
             h2 { font-size: 1.3em; }
-            .simulation-controls select, .simulation-controls input, button {
-                width: 100%;
-                margin-left: 0;
-                margin-right: 0;
-            }
-            .form-group, .details-box {
-                max-width: none;
-            }
+            .simulation-controls select, .simulation-controls input, button { width: 100%; margin-left: 0; margin-right: 0; }
+            .form-group, .details-box { max-width: none; }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Gelişmiş Yarış Simülatörü</h1>
+        <h1>Gelişmiş Yarış Simülatörü v3</h1>
         
         <div class="box" id="login-box">
             <h2>Adım 1: Strava Hesabınıza Bağlanın</h2>
@@ -109,9 +102,9 @@
                     <label for="race-select">Parkur Seçin:</label>
                     <select id="race-select">
                         <option value="custom">Kendi GPX Dosyanı Yükle</option>
-                        <option value="kackar20k">Kaçkar 20K (Temsili)</option>
-                        <option value="kackar50k">Kaçkar 50K (Temsili)</option>
-                        <option value="kackar100k">Kaçkar 100K (Temsili)</option>
+                        <option value="kackar20k">Kaçkar 20K</option>
+                        <option value="kackar50k">Kaçkar 50K</option>
+                        <option value="kackar100k">Kaçkar 100K</option>
                     </select>
                 </div>
                 
@@ -242,6 +235,18 @@ def create_performance_model(gpx_points):
     x_smooth = np.linspace(min(all_slopes[kept_indices]), max(all_slopes[kept_indices]), 100) if len(all_slopes[kept_indices]) > 0 else np.array([])
     y_smooth = final_poly(x_smooth)
     fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode='lines', name='Performans Modeli'))
+    
+    # --- FIX 3: Performans modeli grafiğinin Y eksenini MM:SS formatında gösterme ---
+    y_min_val = min(all_paces[kept_indices]) if len(all_paces[kept_indices]) > 0 else 240
+    y_max_val = max(all_paces[kept_indices]) if len(all_paces[kept_indices]) > 0 else 600
+    y_min_tick = int(y_min_val // 30) * 30
+    y_max_tick = (int(y_max_val // 30) + 1) * 30
+    tick_vals = np.arange(max(120, y_min_tick), y_max_tick, 30)
+    tick_text = [format_pace_mmss(s) for s in tick_vals]
+    fig.update_yaxes(tickvals=tick_vals, ticktext=tick_text, title_text="Pace (MM:SS/km)")
+    # --- BİTTİ ---
+    
+    fig.update_layout(title="Kişisel Eğim/Pace Performans Modeli")
     fig_json = fig.to_json()
     formula_string = f"Pace (sn/km) = {a:.4f} * (Eğim%)² {b:+.4f} * (Eğim%) {c:+.2f}"
     return final_poly.coeffs.tolist(), fig_json, formula_string
@@ -317,8 +322,7 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             day_diff = (arrival_datetime.date() - start_datetime.date()).days
             time_of_day_str = arrival_datetime.strftime('%H:%M') + (f" (+{day_diff}g)" if day_diff > 0 else "")
             table_row = {
-                "segment_name": f"{last_wp_name} → {wp.name}",
-                "segment_dist_km": seg_dist / 1000, "segment_gain_m": seg_gain, "segment_loss_m": seg_loss,
+                "segment_name": f"{last_wp_name} → {wp.name}", "segment_dist_km": seg_dist / 1000, "segment_gain_m": seg_gain, "segment_loss_m": seg_loss,
                 "segment_time_str": format_duration_hhmmss(seg_time), "segment_pace_str": format_pace_mmss(seg_time / (seg_dist/1000) if seg_dist > 0 else 0),
                 "total_dist_km": cumulative_dist_m / 1000, "total_time_str": format_duration_hhmmss(total_time_sec), "time_of_day_str": time_of_day_str,
             }
@@ -327,7 +331,6 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             last_wp_dist, last_wp_time, last_wp_gain, last_wp_loss = cumulative_dist_m, total_time_sec, total_gain, total_loss
             last_wp_name = wp.name
             current_wp_idx += 1
-    
     result_text = f"Tahmini Bitiş Süresi: {format_duration_hhmmss(total_time_sec)}"
     pace_series = pd.Series(raw_pace_sec_km)
     moving_avg_pace_sec_km = pace_series.rolling(window=15, min_periods=1).mean().tolist()
@@ -348,7 +351,6 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
 `;
         // --- END OF PYTHON CODE ---
         
-        // --- START OF JS LOGIC ---
         async function main() {
             const allElements = {
                 loader: document.getElementById('loader'), status: document.getElementById('status'),
@@ -365,12 +367,6 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                 estimatedTime: document.getElementById('estimated-time'), resultGraph: document.getElementById('result-graph'),
                 resultTableContainer: document.getElementById('result-table-container'),
                 raceMapContainer: document.getElementById('race-map-container'), raceMap: document.getElementById('race-map'),
-            };
-
-            const presetGpxData = {
-                kackar20k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.88" lon="41.12"><name>Zirve</name></wpt><trk><name>Kackar 20K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.88" lon="41.12"><ele>2800</ele></trkpt><trkpt lat="40.86" lon="41.15"><ele>2200</ele></trkpt></trkseg></trk></gpx>`,
-                kackar50k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.90" lon="41.15"><name>CP1</name></wpt><trk><name>Kackar 50K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.90" lon="41.15"><ele>3200</ele></trkpt><trkpt lat="40.85" lon="41.20"><ele>2000</ele></trkpt></trkseg></trk></gpx>`,
-                kackar100k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.92" lon="41.18"><name>CP1</name></wpt><wpt lat="40.83" lon="41.25"><name>CP2</name></wpt><trk><name>Kackar 100K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.92" lon="41.18"><ele>3500</ele></trkpt><trkpt lat="40.83" lon="41.25"><ele>1900</ele></trkpt></trkseg></trk></gpx>`
             };
             
             let pyodide, performanceModelCoeffs, trainingAvgHR, raceMapInstance;
@@ -514,11 +510,14 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                             L.marker([wp.lat, wp.lon]).addTo(raceMapInstance).bindPopup(`<b>${wp.name}</b><br>${wp.total_dist_km.toFixed(1)} km`);
                         });
                         
-                        // FIX FOR MAP RENDERING
+                        // --- FIX 2: Haritanın doğru zoom yapmasını sağlayan kod ---
                         setTimeout(() => {
                             raceMapInstance.invalidateSize();
-                            raceMapInstance.fitBounds(routePolyline.getBounds());
+                            if (mapData.route && mapData.route.length > 0) {
+                                raceMapInstance.fitBounds(routePolyline.getBounds());
+                            }
                         }, 100);
+                        // --- BİTTİ ---
                     }
                     
                     allElements.resultBox.style.display = 'block';
@@ -583,8 +582,31 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     reader.onload = (e) => runSimulation(e.target.result);
                     reader.readAsText(raceFile);
                 } else {
-                    const gpxContent = presetGpxData[raceType];
-                    runSimulation(gpxContent);
+                    // --- FIX 1: Gerçek GPX dosyalarını GitHub'dan çekme ---
+                    const gpxFileName = raceType + '.gpx';
+                    const gpxUrl = `https://raw.githubusercontent.com/oraygungor/kackarsim/main/${gpxFileName}`;
+                    
+                    allElements.status.textContent = `${gpxFileName} dosyası GitHub'dan çekiliyor...`;
+                    allElements.loader.style.display = 'block';
+
+                    fetch(gpxUrl)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Dosya yüklenemedi: ${response.statusText}`);
+                            }
+                            return response.text();
+                        })
+                        .then(gpxContent => {
+                            runSimulation(gpxContent);
+                            allElements.loader.style.display = 'none';
+                        })
+                        .catch(error => {
+                            console.error('GPX fetch error:', error);
+                            alert(`${gpxFileName} dosyası GitHub deposunda bulunamadı veya yüklenemedi. Lütfen dosya adının doğru olduğundan ve deponun public olduğundan emin olun.`);
+                            allElements.loader.style.display = 'none';
+                            allElements.status.textContent = "Hata.";
+                        });
+                    // --- BİTTİ ---
                 }
             };
             
