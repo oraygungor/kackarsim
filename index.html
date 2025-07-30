@@ -23,7 +23,7 @@
             font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; 
             line-height: 1.6; margin: 0; padding: 20px; background-color: var(--light-gray); color: var(--text-color);
         }
-        .container { width: 100%; max-width: 9%; margin: auto; }
+        .container { width: 100%; max-width: 95%; margin: auto; }
         .box { 
             background: var(--white); padding: 25px 30px; border-radius: var(--border-radius); 
             box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; 
@@ -155,7 +155,7 @@
                            <label for="fatigue-factor">Her 15 "Ayarlanmış KM"de Performans Düşüşü:</label>
                            <div class="description">(Ayarlanmış KM = Mesafe(km) + Tırmanış(m)/100)</div>
                            <div class="slider-container" style="margin-top: 5px;">
-                               <input type="range" id="fatigue-factor" value="8" min="0" max="50">
+                               <input type="range" id="fatigue-factor" value="5" min="0" max="50">
                                <span id="fatigue-display">5%</span>
                            </div>
                         </div>
@@ -625,7 +625,7 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                 } else {
                     allElements.customGpxUpload.style.display = 'none';
                     if (selection === 'kackar20k') { allElements.targetHrInput.value = 163; allElements.startTimeInput.value = "10:00"; }
-                    else if (selection === 'kackar50k') { allElements.targetHrInput.value = 155; allElements.startTimeInput.value = "07:00"; }
+                    else if (selection === 'kackar50k') { allElements.targetHrInput.value = 153; allElements.startTimeInput.value = "07:00"; }
                     else if (selection === 'kackar100k') { allElements.targetHrInput.value = 145; allElements.startTimeInput.value = "04:00"; }
                 }
             });
