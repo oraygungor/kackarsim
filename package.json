@@ -1,0 +1,9 @@
+{
+  "name": "kackarsim-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "node-fetch": "^2.6.7",
+    "cookie": "^0.6.0"
+  }
+}
