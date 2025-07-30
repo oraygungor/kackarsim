@@ -3,11 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gelişmiş Strava Yarış Simülatörü</title>
+    <title>Gelişmiş Strava Yarış Simülatörü v5</title>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <style>
         :root {
             --primary-color: #fc4c02;
@@ -66,6 +68,8 @@
         #result-table th, #result-table td { border: 1px solid #ddd; padding: 10px; text-align: right; white-space: nowrap; }
         #result-table th { background-color: #f2f2f2; font-weight: bold; }
         #result-table td:first-child, #result-table th:first-child { text-align: left; }
+        #pdf-button { background-color: #17a2b8; display: none; margin-top: 15px; }
+        #pdf-button:hover { background-color: #138496; }
         
         @media (max-width: 768px) {
             body { padding: 5px; }
@@ -79,7 +83,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Gelişmiş Yarış Simülatörü v3</h1>
+        <h1>Gelişmiş Strava Yarış Simülatörü v5</h1>
         
         <div class="box" id="login-box">
             <h2>Adım 1: Strava Hesabınıza Bağlanın</h2>
@@ -120,8 +124,8 @@
                            <label for="fatigue-factor">Her 15 "Ayarlanmış KM"de Performans Düşüşü:</label>
                            <div class="description">(Ayarlanmış KM = Mesafe(km) + Tırmanış(m)/100)</div>
                            <div class="slider-container" style="margin-top: 5px;">
-                               <input type="range" id="fatigue-factor" value="10" min="0" max="50">
-                               <span id="fatigue-display">10%</span>
+                               <input type="range" id="fatigue-factor" value="5" min="0" max="50">
+                               <span id="fatigue-display">5%</span>
                            </div>
                         </div>
                         <div class="form-group">
@@ -146,6 +150,9 @@
             <div id="result-graph"></div>
             <div id="result-table-container"></div>
             <div id="race-map-container" style="display:none;"><div id="race-map"></div></div>
+            <div style="text-align: center;">
+                <button id="pdf-button">Tabloyu PDF Olarak İndir</button>
+            </div>
         </div>
 
         <div id="status"></div>
@@ -231,22 +238,35 @@ def create_performance_model(gpx_points):
     final_poly = np.poly1d(np.polyfit(all_slopes[kept_indices], all_paces[kept_indices], 2))
     a, b, c = final_poly.coeffs
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=all_slopes[kept_indices], y=all_paces[kept_indices], mode='markers', name='Antrenman Verileri'))
+    # FIX 3: Kısaltılmış Efsane İsimleri
+    fig.add_trace(go.Scatter(x=all_slopes[kept_indices], y=all_paces[kept_indices], mode='markers', name='Ant. Veri'))
     x_smooth = np.linspace(min(all_slopes[kept_indices]), max(all_slopes[kept_indices]), 100) if len(all_slopes[kept_indices]) > 0 else np.array([])
     y_smooth = final_poly(x_smooth)
-    fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode='lines', name='Performans Modeli'))
+    fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode='lines', name='Perf. Modeli'))
     
-    # --- FIX 3: Performans modeli grafiğinin Y eksenini MM:SS formatında gösterme ---
     y_min_val = min(all_paces[kept_indices]) if len(all_paces[kept_indices]) > 0 else 240
     y_max_val = max(all_paces[kept_indices]) if len(all_paces[kept_indices]) > 0 else 600
-    y_min_tick = int(y_min_val // 30) * 30
-    y_max_tick = (int(y_max_val // 30) + 1) * 30
-    tick_vals = np.arange(max(120, y_min_tick), y_max_tick, 30)
+    y_min_tick = int(y_min_val // 60) * 60
+    y_max_tick = (int(y_max_val // 60) + 1) * 60
+    # FIX 3: Y eksenindeki değer sıklığı 10 saniyeye düşürüldü (step=10)
+    tick_vals = np.arange(max(120, y_min_tick), y_max_tick, 10)
     tick_text = [format_pace_mmss(s) for s in tick_vals]
     fig.update_yaxes(tickvals=tick_vals, ticktext=tick_text, title_text="Pace (MM:SS/km)")
-    # --- BİTTİ ---
     
-    fig.update_layout(title="Kişisel Eğim/Pace Performans Modeli")
+    # FIX 3: X ekseni sınırları -35/+35
+    fig.update_xaxes(range=[-35, 35], title_text="Eğim (%)")
+    
+    # FIX 3: Efsaneyi grafiğin altına alma
+    fig.update_layout(
+        title="Kişisel Eğim/Pace Performans Modeli",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5
+        )
+    )
     fig_json = fig.to_json()
     formula_string = f"Pace (sn/km) = {a:.4f} * (Eğim%)² {b:+.4f} * (Eğim%) {c:+.2f}"
     return final_poly.coeffs.tolist(), fig_json, formula_string
@@ -321,16 +341,13 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             arrival_datetime = start_datetime + timedelta(seconds=total_time_sec)
             day_diff = (arrival_datetime.date() - start_datetime.date()).days
             time_of_day_str = arrival_datetime.strftime('%H:%M') + (f" (+{day_diff}g)" if day_diff > 0 else "")
-            table_row = {
-                "segment_name": f"{last_wp_name} → {wp.name}", "segment_dist_km": seg_dist / 1000, "segment_gain_m": seg_gain, "segment_loss_m": seg_loss,
-                "segment_time_str": format_duration_hhmmss(seg_time), "segment_pace_str": format_pace_mmss(seg_time / (seg_dist/1000) if seg_dist > 0 else 0),
-                "total_dist_km": cumulative_dist_m / 1000, "total_time_str": format_duration_hhmmss(total_time_sec), "time_of_day_str": time_of_day_str,
-            }
+            table_row = { "segment_name": f"{last_wp_name} → {wp.name}", "segment_dist_km": seg_dist / 1000, "segment_gain_m": seg_gain, "segment_loss_m": seg_loss, "segment_time_str": format_duration_hhmmss(seg_time), "segment_pace_str": format_pace_mmss(seg_time / (seg_dist/1000) if seg_dist > 0 else 0), "total_dist_km": cumulative_dist_m / 1000, "total_time_str": format_duration_hhmmss(total_time_sec), "time_of_day_str": time_of_day_str, }
             table_data.append(table_row)
             map_waypoint_data.append({"lat": wp.latitude, "lon": wp.longitude, "name": wp.name, **table_row})
             last_wp_dist, last_wp_time, last_wp_gain, last_wp_loss = cumulative_dist_m, total_time_sec, total_gain, total_loss
             last_wp_name = wp.name
             current_wp_idx += 1
+    
     result_text = f"Tahmini Bitiş Süresi: {format_duration_hhmmss(total_time_sec)}"
     pace_series = pd.Series(raw_pace_sec_km)
     moving_avg_pace_sec_km = pace_series.rolling(window=15, min_periods=1).mean().tolist()
@@ -367,9 +384,10 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                 estimatedTime: document.getElementById('estimated-time'), resultGraph: document.getElementById('result-graph'),
                 resultTableContainer: document.getElementById('result-table-container'),
                 raceMapContainer: document.getElementById('race-map-container'), raceMap: document.getElementById('race-map'),
+                pdfButton: document.getElementById('pdf-button'),
             };
             
-            let pyodide, performanceModelCoeffs, trainingAvgHR, raceMapInstance;
+            let pyodide, performanceModelCoeffs, trainingAvgHR, raceMapInstance, currentTableData;
 
             async function initializePyodide() {
                 allElements.status.textContent = "Python ortamı hazırlanıyor...";
@@ -398,11 +416,18 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                         allActivities = await response.json();
                         sessionStorage.setItem('stravaActivities', JSON.stringify(allActivities));
                     }
-                    const twoMonthsAgo = new Date();
-                    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-                    const filteredRuns = allActivities.filter(act => new Date(act.start_date) > twoMonthsAgo && act.distance > 13000 && ['Run', 'TrailRun', 'VirtualRun'].includes(act.type))
-                        .sort((a, b) => new Date(b.start_date) - new Date(a.start_date)).slice(0, 40);
-                    if (filteredRuns.length < 3) throw new Error(`Model için yeterli koşu bulunamadı. Bulunan: ${filteredRuns.length}`);
+                    
+                    // FIX 2: Efektif Mesafe Hesaplama
+                    const filteredRuns = allActivities
+                        .map(act => {
+                            const effectiveDistance = (act.distance / 1000) + (act.total_elevation_gain / 100);
+                            return { ...act, effectiveDistance };
+                        })
+                        .filter(act => act.effectiveDistance > 13 && ['Run', 'TrailRun', 'VirtualRun'].includes(act.type))
+                        .sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
+                        .slice(0, 40);
+
+                    if (filteredRuns.length < 3) throw new Error(`Model için yeterli efektif mesafede (>13km) koşu bulunamadı. Bulunan: ${filteredRuns.length}`);
                     if (cachedStreams) {
                         streamsData = JSON.parse(cachedStreams);
                     } else {
@@ -453,8 +478,12 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             }
 
             function renderWaypointTable(tableData) {
+                currentTableData = tableData; // Save for PDF export
                 allElements.resultTableContainer.innerHTML = '';
+                allElements.pdfButton.style.display = 'none';
                 if (!tableData || tableData.length === 0) return;
+                
+                allElements.pdfButton.style.display = 'inline-block';
                 const table = document.createElement('table');
                 table.id = 'result-table';
                 const thead = table.createTHead();
@@ -510,14 +539,12 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                             L.marker([wp.lat, wp.lon]).addTo(raceMapInstance).bindPopup(`<b>${wp.name}</b><br>${wp.total_dist_km.toFixed(1)} km`);
                         });
                         
-                        // --- FIX 2: Haritanın doğru zoom yapmasını sağlayan kod ---
                         setTimeout(() => {
                             raceMapInstance.invalidateSize();
                             if (mapData.route && mapData.route.length > 0) {
                                 raceMapInstance.fitBounds(routePolyline.getBounds());
                             }
                         }, 100);
-                        // --- BİTTİ ---
                     }
                     
                     allElements.resultBox.style.display = 'block';
@@ -538,13 +565,11 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     const cachedData = sessionStorage.getItem('stravaActivities');
                     if (cachedData) {
                          allElements.status.textContent = "Kaydedilmiş oturum bulundu, veriler yükleniyor...";
-                         fetchAndModelActivities();
-                         return;
+                         fetchAndModelActivities(); return;
                     }
                     const response = await fetch('/api/get-activities?check=true');
-                    if (response.ok) {
-                        fetchAndModelActivities();
-                    } else {
+                    if (response.ok) { fetchAndModelActivities(); } 
+                    else {
                         allElements.loginBox.style.display = 'block';
                         allElements.status.textContent = "Başlamak için Strava hesabınıza bağlanın.";
                     }
@@ -554,13 +579,8 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                 }
             }
             
-            allElements.loginButton.onclick = () => { 
-                sessionStorage.clear();
-                window.location.href = '/api/strava-login'; 
-            };
-            allElements.fatigueFactorInput.addEventListener('input', (e) => {
-                allElements.fatigueDisplay.textContent = `${e.target.value}%`;
-            });
+            allElements.loginButton.onclick = () => { sessionStorage.clear(); window.location.href = '/api/strava-login'; };
+            allElements.fatigueFactorInput.addEventListener('input', (e) => { allElements.fatigueDisplay.textContent = `${e.target.value}%`; });
             allElements.raceSelect.addEventListener('change', (e) => {
                 const selection = e.target.value;
                 if (selection === 'custom') {
@@ -582,32 +602,48 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     reader.onload = (e) => runSimulation(e.target.result);
                     reader.readAsText(raceFile);
                 } else {
-                    // --- FIX 1: Gerçek GPX dosyalarını GitHub'dan çekme ---
                     const gpxFileName = raceType + '.gpx';
                     const gpxUrl = `https://raw.githubusercontent.com/oraygungor/kackarsim/main/${gpxFileName}`;
-                    
                     allElements.status.textContent = `${gpxFileName} dosyası GitHub'dan çekiliyor...`;
                     allElements.loader.style.display = 'block';
-
-                    fetch(gpxUrl)
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error(`Dosya yüklenemedi: ${response.statusText}`);
-                            }
-                            return response.text();
-                        })
-                        .then(gpxContent => {
-                            runSimulation(gpxContent);
-                            allElements.loader.style.display = 'none';
-                        })
-                        .catch(error => {
-                            console.error('GPX fetch error:', error);
-                            alert(`${gpxFileName} dosyası GitHub deposunda bulunamadı veya yüklenemedi. Lütfen dosya adının doğru olduğundan ve deponun public olduğundan emin olun.`);
-                            allElements.loader.style.display = 'none';
-                            allElements.status.textContent = "Hata.";
-                        });
-                    // --- BİTTİ ---
+                    fetch(gpxUrl).then(response => {
+                        if (!response.ok) throw new Error(`Dosya yüklenemedi: ${response.statusText}`);
+                        return response.text();
+                    }).then(gpxContent => {
+                        runSimulation(gpxContent);
+                    }).catch(error => {
+                        console.error('GPX fetch error:', error);
+                        alert(`${gpxFileName} dosyası GitHub deposunda bulunamadı veya yüklenemedi.`);
+                        allElements.loader.style.display = 'none';
+                        allElements.status.textContent = "Hata.";
+                    });
                 }
+            };
+            allElements.pdfButton.onclick = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                const totalTime = allElements.estimatedTime.textContent;
+                doc.text("Yaris Simulasyon Sonucu", 14, 16);
+                doc.text(totalTime, 14, 24);
+                
+                const tableBody = currentTableData.map(row => [
+                    row.segment_name,
+                    `${row.segment_dist_km.toFixed(2)} km`,
+                    `+${Math.round(row.segment_gain_m)}m / -${Math.round(row.segment_loss_m)}m`,
+                    row.segment_time_str,
+                    row.segment_pace_str,
+                    `${row.total_dist_km.toFixed(2)} km`,
+                    row.total_time_str,
+                    row.time_of_day_str,
+                ]);
+
+                doc.autoTable({
+                    head: [["Segment", "Mesafe", "Kazanc/Kayip", "Sure", "Pace", "Toplam Mesafe", "Toplam Sure", "Varis Saati"]],
+                    body: tableBody,
+                    startY: 30,
+                    styles: { fontSize: 8 },
+                });
+                doc.save('yaris-simulasyonu.pdf');
             };
             
             init();
