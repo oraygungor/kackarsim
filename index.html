@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gelişmiş Strava Yarış Simülatörü v1.1</title>
+    <title>Gelişmiş Strava Yarış Simülatörü</title>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
@@ -20,16 +20,16 @@
         }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; 
-            line-height: 1.6; margin: 0; padding: 20px; background-color: var(--light-gray); color: var(--text-color);
+            line-height: 1.6; margin: 0; padding: 10px; background-color: var(--light-gray); color: var(--text-color);
         }
-        .container { max-width: 1000px; margin: auto; }
+        .container { width: 100%; max-width: 1000px; margin: auto; }
         .box { 
             background: var(--white); padding: 25px 30px; border-radius: var(--border-radius); 
             box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; 
         }
         h1, h2 { color: var(--text-color); text-align: center; }
-        h1 { font-size: 2.2em; margin-bottom: 10px; }
-        h2 { font-size: 1.6em; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-top: 0;}
+        h1 { font-size: 2.0em; margin-bottom: 10px; }
+        h2 { font-size: 1.5em; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-top: 0;}
         button, input[type="file"], input[type="number"], input[type="time"], select { 
             padding: 12px 18px; cursor: pointer; border-radius: var(--border-radius); 
             border: 1px solid #ccc; font-size: 16px; margin: 5px; 
@@ -61,16 +61,32 @@
         #fatigue-display { font-weight: bold; color: var(--primary-color); min-width: 40px; }
         #custom-gpx-upload { display: none; }
         #race-map { height: 450px; width: 100%; border-radius: var(--border-radius); margin-top: 30px; }
-        #result-table-container { margin-top: 30px; overflow-x: auto; }
+        #result-table-container { margin-top: 30px; overflow-x: auto; display: block; }
         #result-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-        #result-table th, #result-table td { border: 1px solid #ddd; padding: 10px; text-align: right; }
+        #result-table th, #result-table td { border: 1px solid #ddd; padding: 10px; text-align: right; white-space: nowrap; }
         #result-table th { background-color: #f2f2f2; font-weight: bold; }
         #result-table td:first-child, #result-table th:first-child { text-align: left; }
+        
+        /* --- MOBIL UYUMLULUK --- */
+        @media (max-width: 768px) {
+            body { padding: 5px; }
+            .box { padding: 15px; }
+            h1 { font-size: 1.6em; }
+            h2 { font-size: 1.3em; }
+            .simulation-controls select, .simulation-controls input, button {
+                width: 100%;
+                margin-left: 0;
+                margin-right: 0;
+            }
+            .form-group, .details-box {
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Gelişmiş Yarış Simülatörü v1</h1>
+        <h1>Gelişmiş Yarış Simülatörü</h1>
         
         <div class="box" id="login-box">
             <h2>Adım 1: Strava Hesabınıza Bağlanın</h2>
@@ -235,7 +251,7 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
     if any(p.elevation is not None for t in gpx.tracks for s in t.segments for p in s.points):
         gpx.smooth(vertical=True, remove_extremes=True)
     race_points = [p for t in gpx.tracks for s in t.segments for p in s.points]
-    if not race_points: return "GPX dosyasında geçerli rota noktası bulunamadı.", go.Figure().to_json(), None, None
+    if not race_points: return "GPX dosyasında geçerli rota noktası bulunamadı.", go.Figure().to_json(), "[]", "{}"
     start_datetime = datetime.combine(date.today(), datetime.strptime(start_time_str, '%H:%M').time())
     adjusted_km_fatigue_step = 15.0
     last_adjusted_km_milestone = 0
@@ -245,8 +261,24 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
     segment_length = 20.0
     profile_dist_km, profile_ele, raw_pace_sec_km = [0], [race_points[0].elevation or 0], []
     profile_gain, profile_loss = [0.0], [0.0]
+    table_data, map_waypoint_data = [], []
+    waypoint_indices = []
+    process_waypoints = len(gpx.waypoints) > 0
+    if process_waypoints:
+        for waypoint in gpx.waypoints:
+            min_dist, closest_point_index = float('inf'), -1
+            for i, point in enumerate(race_points):
+                dist = waypoint.distance_2d(point)
+                if dist < min_dist: min_dist, closest_point_index = dist, i
+            if closest_point_index != -1: waypoint_indices.append((closest_point_index, waypoint))
+        waypoint_indices.sort(key=lambda x: x[0])
+    
+    last_wp_dist, last_wp_time, last_wp_gain, last_wp_loss = 0, 0, 0, 0
+    last_wp_name = "Start"
+    current_wp_idx = 0
     segment_start_point = race_points[0]
     cumulative_segment_dist = 0.0
+    
     for i in range(1, len(race_points)):
         prev_point, current_point = race_points[i-1], race_points[i]
         delta_dist = current_point.distance_2d(prev_point)
@@ -277,23 +309,42 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             profile_loss.append(total_loss)
             segment_start_point = current_point
             cumulative_segment_dist = 0
+        if process_waypoints and current_wp_idx < len(waypoint_indices) and i >= waypoint_indices[current_wp_idx][0]:
+            wp = waypoint_indices[current_wp_idx][1]
+            seg_dist, seg_time = cumulative_dist_m - last_wp_dist, total_time_sec - last_wp_time
+            seg_gain, seg_loss = total_gain - last_wp_gain, total_loss - last_wp_loss
+            arrival_datetime = start_datetime + timedelta(seconds=total_time_sec)
+            day_diff = (arrival_datetime.date() - start_datetime.date()).days
+            time_of_day_str = arrival_datetime.strftime('%H:%M') + (f" (+{day_diff}g)" if day_diff > 0 else "")
+            table_row = {
+                "segment_name": f"{last_wp_name} → {wp.name}",
+                "segment_dist_km": seg_dist / 1000, "segment_gain_m": seg_gain, "segment_loss_m": seg_loss,
+                "segment_time_str": format_duration_hhmmss(seg_time), "segment_pace_str": format_pace_mmss(seg_time / (seg_dist/1000) if seg_dist > 0 else 0),
+                "total_dist_km": cumulative_dist_m / 1000, "total_time_str": format_duration_hhmmss(total_time_sec), "time_of_day_str": time_of_day_str,
+            }
+            table_data.append(table_row)
+            map_waypoint_data.append({"lat": wp.latitude, "lon": wp.longitude, "name": wp.name, **table_row})
+            last_wp_dist, last_wp_time, last_wp_gain, last_wp_loss = cumulative_dist_m, total_time_sec, total_gain, total_loss
+            last_wp_name = wp.name
+            current_wp_idx += 1
+    
     result_text = f"Tahmini Bitiş Süresi: {format_duration_hhmmss(total_time_sec)}"
     pace_series = pd.Series(raw_pace_sec_km)
     moving_avg_pace_sec_km = pace_series.rolling(window=15, min_periods=1).mean().tolist()
     fig = go.Figure()
     formatted_avg_paces = [format_pace_mmss(p) for p in moving_avg_pace_sec_km]
     full_custom_data = np.stack((np.array(formatted_avg_paces), np.array(profile_gain[1:]), np.array(profile_loss[1:])), axis=-1)
-    fig.add_trace(go.Scatter(x=profile_dist_km[1:], y=profile_ele[1:], name='Yükseklik Profili', yaxis='y2', line=dict(color='darkgreen'), customdata=full_custom_data, hovertemplate=('<b>Mesafe: %{x:.2f} km</b><br>' + 'Yükseklik: %{y:.0f} m<br>' + 'Ort. Pace: %{customdata[0]}/km<br>' + 'Toplam Kazanç: +%{customdata[1]:.0f} m<br>' + 'Toplam Kayıp: -%{customdata[2]:.0f} m<extra></extra>')))
-    fig.add_trace(go.Scatter(x=profile_dist_km[1:], y=[p / 60 for p in moving_avg_pace_sec_km], name='Tahmini Ort. Pace', line=dict(color='orange'), customdata=full_custom_data, hovertemplate=('<b>Mesafe: %{x:.2f} km</b><br>' + 'Ort. Pace: %{customdata[0]}/km<br>' + 'Yükseklik: %{y:.0f} m<br>' + 'Toplam Kazanç: +%{customdata[1]:.0f} m<br>' + 'Toplam Kayıp: -%{customdata[2]:.0f} m<extra></extra>')))
-    y_tickvals_min, y_ticktext_str = [], []
+    fig.add_trace(go.Scatter(x=profile_dist_km[1:], y=profile_ele[1:], name='Yükseklik Profili', yaxis='y2', line=dict(color='darkgreen'), customdata=full_custom_data, hovertemplate=('<b>Mesafe: %{x:.2f} km</b><br>' + 'Yükseklik: %{y:.0f} m<br>' + 'Ort. Pace: %{customdata[0]}/km<extra></extra>')))
+    fig.add_trace(go.Scatter(x=profile_dist_km[1:], y=[p / 60 for p in moving_avg_pace_sec_km], name='Tahmini Ort. Pace', line=dict(color='orange'), customdata=full_custom_data, hovertemplate=('<b>Mesafe: %{x:.2f} km</b><br>' + 'Ort. Pace: %{customdata[0]}/km<extra></extra>')))
     if moving_avg_pace_sec_km:
         y_min_sec, y_max_sec = int(min(moving_avg_pace_sec_km)//30)*30, (int(max(moving_avg_pace_sec_km)//30)+1)*30
         y_tickvals_sec = np.arange(max(0, y_min_sec), y_max_sec, 30)
         y_ticktext_str, y_tickvals_min = [format_pace_mmss(s) for s in y_tickvals_sec], [s/60 for s in y_tickvals_sec]
-    fig.update_layout(title="Yarış Simülasyonu Profili", xaxis_title="Mesafe (km)", yaxis=dict(title="Pace (MM:SS/km)", tickvals=y_tickvals_min, ticktext=y_ticktext_str), yaxis2=dict(title="Yükseklik (m)", overlaying='y', side='right'), legend=dict(x=0.5, y=-0.2, xanchor='center', yanchor='top', orientation="h"))
+        fig.update_layout(yaxis=dict(title="Pace (MM:SS/km)", tickvals=y_tickvals_min, ticktext=y_ticktext_str))
+    fig.update_layout(title="Yarış Simülasyonu Profili", xaxis_title="Mesafe (km)", yaxis2=dict(title="Yükseklik (m)", overlaying='y', side='right'), legend=dict(x=0.5, y=-0.2, xanchor='center', yanchor='top', orientation="h"))
     if profile_dist_km and len(profile_dist_km) > 1: fig.update_xaxes(range=[0, profile_dist_km[-1]])
-    map_data = {"route": [[p.latitude, p.longitude] for p in race_points], "waypoints": []}
-    return result_text, fig.to_json(), "[]", json.dumps(map_data)
+    map_data = {"route": [[p.latitude, p.longitude] for p in race_points], "waypoints": map_waypoint_data}
+    return result_text, fig.to_json(), json.dumps(table_data), json.dumps(map_data)
 `;
         // --- END OF PYTHON CODE ---
         
@@ -317,9 +368,9 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             };
 
             const presetGpxData = {
-                kackar20k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><trk><name>Kackar 20K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.88" lon="41.12"><ele>2800</ele></trkpt><trkpt lat="40.86" lon="41.15"><ele>2200</ele></trkpt></trkseg></trk></gpx>`,
-                kackar50k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><trk><name>Kackar 50K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.90" lon="41.15"><ele>3200</ele></trkpt><trkpt lat="40.85" lon="41.20"><ele>2000</ele></trkpt></trkseg></trk></gpx>`,
-                kackar100k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><trk><name>Kackar 100K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.92" lon="41.18"><ele>3500</ele></trkpt><trkpt lat="40.83" lon="41.25"><ele>1900</ele></trkpt></trkseg></trk></gpx>`
+                kackar20k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.88" lon="41.12"><name>Zirve</name></wpt><trk><name>Kackar 20K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.88" lon="41.12"><ele>2800</ele></trkpt><trkpt lat="40.86" lon="41.15"><ele>2200</ele></trkpt></trkseg></trk></gpx>`,
+                kackar50k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.90" lon="41.15"><name>CP1</name></wpt><trk><name>Kackar 50K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.90" lon="41.15"><ele>3200</ele></trkpt><trkpt lat="40.85" lon="41.20"><ele>2000</ele></trkpt></trkseg></trk></gpx>`,
+                kackar100k: `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"><wpt lat="40.85" lon="41.08"><name>Start</name></wpt><wpt lat="40.92" lon="41.18"><name>CP1</name></wpt><wpt lat="40.83" lon="41.25"><name>CP2</name></wpt><trk><name>Kackar 100K</name><trkseg><trkpt lat="40.85" lon="41.08"><ele>2100</ele></trkpt><trkpt lat="40.92" lon="41.18"><ele>3500</ele></trkpt><trkpt lat="40.83" lon="41.25"><ele>1900</ele></trkpt></trkseg></trk></gpx>`
             };
             
             let pyodide, performanceModelCoeffs, trainingAvgHR, raceMapInstance;
@@ -342,9 +393,7 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     const cachedActivities = sessionStorage.getItem('stravaActivities');
                     const cachedStreams = sessionStorage.getItem('stravaStreams');
                     let allActivities, streamsData;
-
                     if (cachedActivities) {
-                        allElements.status.textContent = "Önbellekten aktivite listesi alınıyor...";
                         allActivities = JSON.parse(cachedActivities);
                     } else {
                         allElements.status.textContent = "Strava aktivite listeniz çekiliyor...";
@@ -353,37 +402,23 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                         allActivities = await response.json();
                         sessionStorage.setItem('stravaActivities', JSON.stringify(allActivities));
                     }
-
                     const twoMonthsAgo = new Date();
                     twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-                    const MIN_DISTANCE = 13000;
-                    const MAX_RUNS_FOR_MODEL = 40;
-
-                    const filteredRuns = allActivities
-                        .filter(act => new Date(act.start_date) > twoMonthsAgo && act.distance > MIN_DISTANCE && ['Run', 'TrailRun', 'VirtualRun'].includes(act.type))
-                        .sort((a, b) => new Date(b.start_date) - new Date(a.start_date))
-                        .slice(0, MAX_RUNS_FOR_MODEL);
-
-                    if (filteredRuns.length < 3) throw new Error(`Model için yeterli koşu bulunamadı (Son 2 ay, >13km). Bulunan: ${filteredRuns.length}`);
-
+                    const filteredRuns = allActivities.filter(act => new Date(act.start_date) > twoMonthsAgo && act.distance > 13000 && ['Run', 'TrailRun', 'VirtualRun'].includes(act.type))
+                        .sort((a, b) => new Date(b.start_date) - new Date(a.start_date)).slice(0, 40);
+                    if (filteredRuns.length < 3) throw new Error(`Model için yeterli koşu bulunamadı. Bulunan: ${filteredRuns.length}`);
                     if (cachedStreams) {
-                        allElements.status.textContent = "Önbellekten detay verileri alınıyor...";
                         streamsData = JSON.parse(cachedStreams);
                     } else {
                         allElements.status.textContent = `Model için gereken ${filteredRuns.length} koşunun detayları çekiliyor...`;
                         const activityIds = filteredRuns.map(a => a.id);
                         const streamsResponse = await fetch('/api/get-streams', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ ids: activityIds })
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: activityIds })
                         });
                         if (!streamsResponse.ok) throw new Error("Aktivite detayları çekilemedi.");
                         streamsData = await streamsResponse.json();
-                        try {
-                            sessionStorage.setItem('stravaStreams', JSON.stringify(streamsData));
-                        } catch (e) {
-                            console.warn("Stream verileri önbellek limitini aştığı için kaydedilemedi.");
-                        }
+                        try { sessionStorage.setItem('stravaStreams', JSON.stringify(streamsData)); } 
+                        catch (e) { console.warn("Stream verileri önbellek limitini aştı."); }
                     }
                     await createCombinedModel(filteredRuns, streamsData);
                 } catch (error) {
@@ -421,11 +456,32 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                 allElements.simulationBox.style.display = 'block';
             }
 
+            function renderWaypointTable(tableData) {
+                allElements.resultTableContainer.innerHTML = '';
+                if (!tableData || tableData.length === 0) return;
+                const table = document.createElement('table');
+                table.id = 'result-table';
+                const thead = table.createTHead();
+                const headerRow = thead.insertRow();
+                const headers = ["Segment", "Mesafe", "Kazanç/Kayıp", "Süre", "Pace", "Toplam Mesafe", "Toplam Süre", "Varış Saati"];
+                headers.forEach(text => { const th = document.createElement('th'); th.textContent = text; headerRow.appendChild(th); });
+                const tbody = table.createTBody();
+                tableData.forEach(row => {
+                    const tr = tbody.insertRow();
+                    tr.insertCell().textContent = row.segment_name;
+                    tr.insertCell().textContent = `${row.segment_dist_km.toFixed(2)} km`;
+                    tr.insertCell().textContent = `+${Math.round(row.segment_gain_m)}m / -${Math.round(row.segment_loss_m)}m`;
+                    tr.insertCell().textContent = row.segment_time_str;
+                    tr.insertCell().textContent = row.segment_pace_str;
+                    tr.insertCell().textContent = `${row.total_dist_km.toFixed(2)} km`;
+                    tr.insertCell().textContent = row.total_time_str;
+                    tr.insertCell().textContent = row.time_of_day_str;
+                });
+                allElements.resultTableContainer.appendChild(table);
+            }
+
             function runSimulation(gpxContent) {
-                if (!performanceModelCoeffs) {
-                    alert("Önce performans modeli oluşturulmalıdır.");
-                    return;
-                }
+                if (!performanceModelCoeffs) { alert("Önce performans modeli oluşturulmalıdır."); return; }
                 allElements.status.textContent = "Yarış simüle ediliyor...";
                 allElements.loader.style.display = 'block';
                 allElements.resultBox.style.display = 'none';
@@ -442,6 +498,10 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     allElements.estimatedTime.textContent = resultText;
                     Plotly.newPlot(allElements.resultGraph, JSON.parse(resultFigJson).data, JSON.parse(resultFigJson).layout, {responsive: true});
                     
+                    if(tableDataJson) {
+                        renderWaypointTable(JSON.parse(tableDataJson));
+                    }
+
                     if (mapDataJson) {
                         const mapData = JSON.parse(mapDataJson);
                         allElements.raceMapContainer.style.display = 'block';
@@ -449,7 +509,16 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                         raceMapInstance = L.map(allElements.raceMap);
                         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenTopoMap' }).addTo(raceMapInstance);
                         const routePolyline = L.polyline(mapData.route, {color: 'blue'}).addTo(raceMapInstance);
-                        raceMapInstance.fitBounds(routePolyline.getBounds());
+                        
+                        mapData.waypoints.forEach(wp => {
+                            L.marker([wp.lat, wp.lon]).addTo(raceMapInstance).bindPopup(`<b>${wp.name}</b><br>${wp.total_dist_km.toFixed(1)} km`);
+                        });
+                        
+                        // FIX FOR MAP RENDERING
+                        setTimeout(() => {
+                            raceMapInstance.invalidateSize();
+                            raceMapInstance.fitBounds(routePolyline.getBounds());
+                        }, 100);
                     }
                     
                     allElements.resultBox.style.display = 'block';
