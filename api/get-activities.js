@@ -9,31 +9,43 @@ export default async function handler(req, res) {
     return res.status(401).json({ message: 'Yetkilendirme Gerekli' });
   }
 
-  // Quick check for login status
+  // Frontend'den gelen oturum kontrolü isteğini hızlıca yanıtla
   if (req.query.check === 'true') {
     return res.status(200).json({ message: 'Oturum aktif' });
   }
 
   try {
-    // Fetch only the last 100 activities to prevent timeouts. This is plenty for the model.
-    const perPage = 100;
-    const response = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`, {
+    // Sadece son 200 aktiviteyi çekerek zaman aşımını önle
+    const perPage = 200; 
+    const activitiesResponse = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Strava API Error:', errorData);
-      throw new Error(`Strava API hatası: ${response.statusText}`);
+    if (!activitiesResponse.ok) {
+      throw new Error(`Strava API aktivite listesi hatası: ${activitiesResponse.statusText}`);
     }
 
-    const activities = await response.json();
+    const activities = await activitiesResponse.json();
 
-    // The stream data will be requested from the frontend's Python code later if needed.
-    // For now, just send the activities. This is much faster.
-    res.status(200).json(activities);
+    // Sadece bu aktivitelerin detay verilerini (stream) çek
+    const activitiesWithStreams = await Promise.all(
+      activities.map(async (activity) => {
+        const streamResponse = await fetch(`https://www.strava.com/api/v3/activities/${activity.id}/streams?keys=time,latlng,altitude&key_by_type=true`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        
+        if (streamResponse.ok) {
+          activity.streams = await streamResponse.json();
+        } else {
+          activity.streams = {}; // Stream alınamazsa boş obje ata
+        }
+        return activity;
+      })
+    );
+
+    res.status(200).json(activitiesWithStreams);
 
   } catch (error) {
     console.error('Aktivite çekme hatası:', error);
