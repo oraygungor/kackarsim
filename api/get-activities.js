@@ -1,5 +1,3 @@
-// /api/get-activities.js
-
 import fetch from 'node-fetch';
 import cookie from 'cookie';
 
@@ -10,47 +8,32 @@ export default async function handler(req, res) {
   if (!token) {
     return res.status(401).json({ message: 'Yetkilendirme Gerekli' });
   }
-  
-  // Sadece oturum kontrolü için hızlı bir istek
+
+  // Quick check for login status
   if (req.query.check === 'true') {
-      return res.status(200).json({ message: 'Oturum aktif' });
+    return res.status(200).json({ message: 'Oturum aktif' });
   }
 
   try {
-    let page = 1;
-    let allActivities = [];
-    const perPage = 100; // Sayfa başına aktivite sayısı (max 200)
+    // Fetch only the last 100 activities to prevent timeouts. This is plenty for the model.
+    const perPage = 100;
+    const response = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
 
-    while (true) {
-      const response = await fetch(`https://www.strava.com/api/v3/athlete/activities?page=${page}&per_page=${perPage}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Strava API hatası: ${response.statusText}`);
-      }
-
-      const activities = await response.json();
-      if (activities.length === 0) {
-        break; // Daha fazla aktivite yoksa döngüden çık
-      }
-      
-      // Her aktivite için stream verilerini çek
-      const activitiesWithStreams = await Promise.all(activities.map(async (activity) => {
-          const streamResponse = await fetch(`https://www.strava.com/api/v3/activities/${activity.id}/streams?keys=time,latlng,altitude&key_by_type=true`, {
-              headers: { Authorization: `Bearer ${token}` }
-          });
-          activity.streams = await streamResponse.json();
-          return activity;
-      }));
-      
-      allActivities = allActivities.concat(activitiesWithStreams);
-      page++;
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Strava API Error:', errorData);
+      throw new Error(`Strava API hatası: ${response.statusText}`);
     }
 
-    res.status(200).json(allActivities);
+    const activities = await response.json();
+
+    // The stream data will be requested from the frontend's Python code later if needed.
+    // For now, just send the activities. This is much faster.
+    res.status(200).json(activities);
 
   } catch (error) {
     console.error('Aktivite çekme hatası:', error);
