@@ -9,25 +9,41 @@ export default async function handler(req, res) {
     return res.status(401).json({ message: 'Yetkilendirme Gerekli' });
   }
 
-  // Oturum kontrolü için
+  // Frontend'den gelen oturum kontrolü isteğini hızlıca yanıtla
   if (req.query.check === 'true') {
     return res.status(200).json({ message: 'Oturum aktif' });
   }
 
   try {
-    const perPage = 100; // Son 200 aktiviteyi çek
-    const response = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=${perPage}`, {
+    // --- YENİ EKLENEN KISIM: Zaman damgası (timestamp) hesaplama ---
+    const twoMonthsAgo = new Date();
+    // Tarihi tam olarak 2 ay geriye ayarla
+    twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+    // Strava API'si Unix zaman damgası (saniye cinsinden) bekler
+    const afterTimestamp = Math.floor(twoMonthsAgo.getTime() / 1000);
+    // --- BİTTİ ---
+
+    // Güvenlik önlemi olarak hala sayfa başına 200 aktivite limiti koyuyoruz
+    const perPage = 200; 
+
+    // --- GÜNCELLENEN KISIM: URL'ye 'after' parametresi eklendi ---
+    const apiUrl = `https://www.strava.com/api/v3/athlete/activities?after=${afterTimestamp}&per_page=${perPage}`;
+    // --- BİTTİ ---
+    
+    const response = await fetch(apiUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Strava API Error:', errorText);
       throw new Error(`Strava API hatası: ${response.statusText}`);
     }
 
     const activities = await response.json();
-    res.status(200).json(activities); // Stream olmadan, sadece listeyi hızlıca gönder
+    res.status(200).json(activities);
 
   } catch (error) {
     console.error('Aktivite listesi çekme hatası:', error);
