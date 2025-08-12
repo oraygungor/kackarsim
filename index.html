@@ -333,13 +333,11 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
         current_milestone_count = int(current_adjusted_km // adjusted_km_fatigue_step)
 
         
-  while last_adjusted_km_milestone < current_milestone_count:
-    milestone_index = last_adjusted_km_milestone + 1   # 1,2,3,...
-    # İlkinde %fatigue_percent, sonra % (fatigue_percent-1), ... 1'e kadar; sonrası 0
+while last_adjusted_km_milestone < current_milestone_count:
+    milestone_index = last_adjusted_km_milestone + 1  # 1, 2, 3, ...
     step_drop_percent = max(fatigue_percent - (milestone_index - 1), 0)
     if step_drop_percent > 0:
         fatigue_factor *= (1.0 + step_drop_percent / 100.0)
-    # step_drop_percent 0 ise artık ek düşüş yok
     last_adjusted_km_milestone += 1
             
         if cumulative_segment_dist >= segment_length:
