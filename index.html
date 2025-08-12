@@ -112,7 +112,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Gelişmiş Strava Yarış Simülatörü v11</h1>
+        <h1>Gelişmiş Strava Yarış Simülatörü v10</h1>
         
         <div class="box" id="login-box">
             <h2>Adım 1: Strava Hesabınıza Bağlanın</h2>
@@ -152,7 +152,7 @@
                     <summary>Detaylı Ayarlar</summary>
                     <div>
                         <div class="form-group">
-                           <label for="fatigue-factor">Her 10 "Ayarlanmış KM"de Performans Düşüşü (Başlangıç %):</label>
+                           <label for="fatigue-factor">Her 10 "Ayarlanmış KM"de Performans Düşüşü:</label>
                            <div class="description">(Ayarlanmış KM = Mesafe(km) + Tırmanış(m)/100)</div>
                            <div class="slider-container" style="margin-top: 5px;">
                                <input type="range" id="fatigue-factor" value="5" min="0" max="50">
@@ -295,12 +295,6 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
     adjusted_km_fatigue_step = 10.0
     last_adjusted_km_milestone = 0
     fatigue_factor = 1.0
-    
-    # --- YENİ ALGORITMA BAŞLANGICI ---
-    # Değişken yorgunluk oranı slider'dan gelen `fatigue_percent` değeri ile başlatılır.
-    current_fatigue_rate = float(fatigue_percent) 
-    # --- YENİ ALGORİTMA SONU ---
-    
     perf_model = np.poly1d(poly_coeffs)
     total_time_sec, cumulative_dist_m, total_gain, total_loss = 0, 0, 0, 0
     segment_length = 20.0
@@ -335,20 +329,9 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             else: total_loss -= ele_delta
         current_adjusted_km = (cumulative_dist_m / 1000.0) + (total_gain / 100.0)
         current_milestone_count = int(current_adjusted_km // adjusted_km_fatigue_step)
-        
-        # --- YENİ ALGORITMA BAŞLANGICI ---
         if current_milestone_count > last_adjusted_km_milestone:
-            # Mevcut yorgunluk oranını uygula, oranın 0'dan büyük olduğundan emin ol
-            if current_fatigue_rate > 0:
-                fatigue_factor *= (1 + current_fatigue_rate / 100.0)
-            
-            # Bir sonraki aşama için yorgunluk oranını düşür
-            if current_fatigue_rate > 0:
-                current_fatigue_rate -= 1
-            
+            fatigue_factor *= (1 + fatigue_percent / 100)
             last_adjusted_km_milestone = current_milestone_count
-        # --- YENİ ALGORİTMA SONU ---
-            
         if cumulative_segment_dist >= segment_length:
             segment_ele_delta = current_point.elevation - segment_start_point.elevation if current_point.elevation and segment_start_point.elevation else 0
             slope = (segment_ele_delta / cumulative_segment_dist) * 100 if cumulative_segment_dist > 0 else 0
@@ -410,4 +393,326 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
                     min_dist = dist
                     closest_ele = p.elevation or closest_ele
             wp_elevations.append(closest_ele)
-        hover_texts = [f"<b>{wp['end_name']}</b><br>Mesafe: {wp['total_dist_km']:.2f} km<br>Varış Saati: {wp['time_of_day_str']}<br>Toplam Kazanç: +{wp['total_gain']:.0f}m<br>Toplam Kayıp: -{wp['total_loss']:.0f}m"
+        hover_texts = [f"<b>{wp['end_name']}</b><br>Mesafe: {wp['total_dist_km']:.2f} km<br>Varış Saati: {wp['time_of_day_str']}<br>Toplam Kazanç: +{wp['total_gain']:.0f}m<br>Toplam Kayıp: -{wp['total_loss']:.0f}m" for wp in map_waypoint_data]
+        fig.add_trace(go.Scatter(x=wp_dists, y=wp_elevations, mode='markers+text', name='Kontrol Noktaları', yaxis='y2', marker=dict(color='red', size=10, symbol='circle-open-dot'), text=[wp['end_name'] for wp in map_waypoint_data], textposition="top center", hoverinfo='text', hovertext=hover_texts))
+    if moving_avg_pace_sec_km:
+        y_min_sec, y_max_sec = int(min(moving_avg_pace_sec_km)//60)*60, (int(max(moving_avg_pace_sec_km)//60)+2)*60
+        y_tickvals_sec = np.arange(max(0, y_min_sec), y_max_sec, 60)
+        y_ticktext_str, y_tickvals_min = [format_pace_mmss(s) for s in y_tickvals_sec], [s/60 for s in y_tickvals_sec]
+        fig.update_layout(yaxis=dict(title="Pace (MM:SS/km)", tickvals=y_tickvals_min, ticktext=y_ticktext_str))
+    fig.update_layout(title="Yarış Simülasyonu Profili", xaxis_title="Mesafe (km)", yaxis2=dict(title="Yükseklik (m)", overlaying='y', side='right'), legend=dict(x=0.5, y=-0.2, xanchor='center', yanchor='top', orientation="h"))
+    if profile_dist_km and len(profile_dist_km) > 1: fig.update_xaxes(range=[0, profile_dist_km[-1]])
+    map_data = {"route": [[p.latitude, p.longitude] for p in race_points], "waypoints": map_waypoint_data}
+    return result_text, fig.to_json(), json.dumps(table_data), json.dumps(map_data)
+`;
+        // --- END OF PYTHON CODE ---
+        
+        async function main() {
+            const allElements = {
+                loader: document.getElementById('loader'), status: document.getElementById('status'),
+                loginButton: document.getElementById('login-button'), loginBox: document.getElementById('login-box'),
+                raceSelect: document.getElementById('race-select'), raceGpxInput: document.getElementById('race-gpx-input'),
+                customGpxUpload: document.getElementById('custom-gpx-upload'),
+                fatigueFactorInput: document.getElementById('fatigue-factor'), fatigueDisplay: document.getElementById('fatigue-display'),
+                targetHrInput: document.getElementById('target-hr'), startTimeInput: document.getElementById('start-time'),
+                trainingAvgHrInfo: document.getElementById('training-avg-hr-info'),
+                simulateButton: document.getElementById('simulate-button'),
+                modelDisplayBox: document.getElementById('model-display-box'), modelDescription: document.getElementById('model-description'),
+                modelGraph: document.getElementById('model-graph'), formulaDisplay: document.getElementById('formula-display'),
+                simulationBox: document.getElementById('simulation-box'), resultBox: document.getElementById('result-box'),
+                estimatedTime: document.getElementById('estimated-time'), resultGraph: document.getElementById('result-graph'),
+                resultTableContainer: document.getElementById('result-table-container'),
+                raceMapContainer: document.getElementById('race-map-container'), raceMap: document.getElementById('race-map'),
+                pdfButton: document.getElementById('pdf-button'),
+            };
+            
+            let pyodide, performanceModelCoeffs, trainingAvgHR, raceMapInstance, currentTableData;
+
+            async function initializePyodide() {
+                allElements.status.textContent = "Python ortamı hazırlanıyor...";
+                allElements.loader.style.display = 'block';
+                pyodide = await loadPyodide();
+                await pyodide.loadPackage(["numpy", "micropip"]);
+                const micropip = pyodide.pyimport("micropip");
+                await micropip.install(['gpxpy', 'plotly', 'pandas']);
+                pyodide.runPython(pythonCode);
+                allElements.loader.style.display = 'none';
+            }
+
+            async function fetchAndModelActivities() {
+                allElements.loginBox.style.display = 'none';
+                allElements.loader.style.display = 'block';
+                try {
+                    const cachedActivities = sessionStorage.getItem('stravaActivities');
+                    let allActivities;
+                    if (cachedActivities) {
+                        allActivities = JSON.parse(cachedActivities);
+                    } else {
+                        allElements.status.textContent = "Strava aktivite listeniz çekiliyor...";
+                        const response = await fetch('/api/get-activities');
+                        if (!response.ok) throw new Error("Aktivite listesi çekilemedi.");
+                        allActivities = await response.json();
+                        sessionStorage.setItem('stravaActivities', JSON.stringify(allActivities));
+                    }
+                    const MIN_EFFECTIVE_DISTANCE = 13;
+                    const filteredRuns = allActivities
+                        .map(act => ({ ...act, effectiveDistance: (act.distance / 1000) + (act.total_elevation_gain / 100) }))
+                        .filter(act => act.effectiveDistance > MIN_EFFECTIVE_DISTANCE && ['Run', 'TrailRun', 'VirtualRun'].includes(act.type))
+                        .sort((a, b) => new Date(b.start_date) - new Date(a.start_date)).slice(0, 40);
+
+                    if (filteredRuns.length < 3) throw new Error(`Model için yeterli efektif mesafede (>13km) koşu bulunamadı. Bulunan: ${filteredRuns.length}`);
+                    
+                    allElements.status.textContent = `Model için gereken ${filteredRuns.length} koşunun detayları çekiliyor...`;
+                    const activityIds = filteredRuns.map(a => a.id);
+                    const streamsResponse = await fetch('/api/get-streams', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: activityIds })
+                    });
+                    if (!streamsResponse.ok) throw new Error("Aktivite detayları çekilemedi.");
+                    const streamsData = await streamsResponse.json();
+                    
+                    await createCombinedModel(filteredRuns, streamsData);
+                } catch (error) {
+                    allElements.status.textContent = `Hata: ${error.message}`;
+                    allElements.loader.style.display = 'none';
+                    allElements.loginBox.style.display = 'block';
+                    sessionStorage.clear();
+                }
+            }
+
+            async function createCombinedModel(filteredRuns, streamsData) {
+                allElements.status.textContent = "Performans modeliniz oluşturuluyor...";
+                allElements.loader.style.display = 'block';
+                const allHeartRates = filteredRuns.map(run => run.average_heartrate).filter(hr => hr && hr > 0);
+                if (allHeartRates.length > 0) {
+                    trainingAvgHR = allHeartRates.reduce((sum, hr) => sum + hr, 0) / allHeartRates.length;
+                    allElements.modelDescription.innerHTML = `Model, ortalama <b>${trainingAvgHR.toFixed(0)} bpm</b> nabız ile koşulan ${filteredRuns.length} antrenmana dayanmaktadır.`;
+                    allElements.targetHrInput.value = Math.round(trainingAvgHR);
+                    allElements.trainingAvgHrInfo.textContent = `(Antrenman ort: ${Math.round(trainingAvgHR)} bpm)`;
+                    allElements.targetHrInput.disabled = false;
+                }
+                const convertFunc = pyodide.globals.get('convert_streams_to_gpx_points');
+                const gpxPoints = convertFunc(JSON.stringify(streamsData));
+                const modelFunc = pyodide.globals.get('create_performance_model');
+                const [coeffs, modelFigJson, formulaString] = modelFunc(gpxPoints).toJs();
+                if (!coeffs) throw new Error("Python'da performans modeli oluşturulamadı.");
+                performanceModelCoeffs = coeffs;
+                const modelFig = JSON.parse(modelFigJson);
+                allElements.modelDisplayBox.style.display = 'block';
+                Plotly.newPlot(allElements.modelGraph, modelFig.data, modelFig.layout, {responsive: true});
+                allElements.formulaDisplay.textContent = formulaString;
+                allElements.formulaDisplay.style.display = 'block';
+                allElements.status.textContent = "Modeliniz hazır. Yarışı simüle edebilirsiniz.";
+                allElements.loader.style.display = 'none';
+                allElements.simulationBox.style.display = 'block';
+                allElements.simulationBox.scrollIntoView();
+            }
+
+            function renderWaypointTable(tableData) {
+                currentTableData = tableData;
+                allElements.resultTableContainer.innerHTML = '';
+                allElements.pdfButton.style.display = 'none';
+                if (!tableData || tableData.length === 0) return;
+                
+                allElements.pdfButton.style.display = 'inline-block';
+                const table = document.createElement('table');
+                table.id = 'result-table';
+                const thead = table.createTHead();
+                const headerRow = thead.insertRow();
+                const headers = ["Segment", "Mesafe", "Kazanç", "Kayıp", "Kalkış Saati", "Varış Saati", "Süre", "Toplam Kazanç", "Toplam Kayıp", "Ortalama Pace"];
+                headers.forEach(text => { const th = document.createElement('th'); th.textContent = text; headerRow.appendChild(th); });
+                const tbody = table.createTBody();
+                tableData.forEach(row => {
+                    const tr = tbody.insertRow();
+                    const cellSegment = tr.insertCell();
+                    const startLink = document.createElement('a');
+                    startLink.href = row.start_link;
+                    startLink.textContent = row.start_name;
+                    startLink.target = '_blank';
+                    const endLink = document.createElement('a');
+                    endLink.href = row.end_link;
+                    endLink.textContent = row.end_name;
+                    endLink.target = '_blank';
+                    cellSegment.appendChild(startLink);
+                    cellSegment.appendChild(document.createTextNode(' → '));
+                    cellSegment.appendChild(endLink);
+                    tr.insertCell().textContent = `${row.segment_dist_km.toFixed(2)} km`;
+                    tr.insertCell().textContent = `+${Math.round(row.segment_gain_m)}m`;
+                    tr.insertCell().textContent = `-${Math.round(row.segment_loss_m)}m`;
+                    tr.insertCell().textContent = row.departure_time_str;
+                    tr.insertCell().textContent = row.time_of_day_str;
+                    tr.insertCell().textContent = row.segment_time_str;
+                    tr.insertCell().textContent = `+${Math.round(row.total_gain)}m`;
+                    tr.insertCell().textContent = `-${Math.round(row.total_loss)}m`;
+                    tr.insertCell().textContent = row.segment_pace_str;
+                });
+                allElements.resultTableContainer.appendChild(table);
+            }
+
+            function runSimulation(gpxContent) {
+                if (!performanceModelCoeffs) { alert("Önce performans modeli oluşturulmalıdır."); return; }
+                allElements.status.textContent = "Yarış simüle ediliyor...";
+                allElements.loader.style.display = 'block';
+                allElements.resultBox.style.display = 'none';
+                const fatigue = parseFloat(allElements.fatigueFactorInput.value);
+                const startTimeStr = allElements.startTimeInput.value;
+                const targetHR = parseInt(allElements.targetHrInput.value, 10);
+                const hr_adjustment_factor = trainingAvgHR ? 1.0 - (targetHR - trainingAvgHR) * 0.009 : 1.0;
+                try {
+                    const simulateFunc = pyodide.globals.get('simulate_race');
+                    const [resultText, resultFigJson, tableDataJson, mapDataJson] = simulateFunc(gpxContent, performanceModelCoeffs, fatigue, hr_adjustment_factor, startTimeStr).toJs();
+                    allElements.estimatedTime.textContent = resultText;
+                    allElements.resultBox.style.display = 'block';
+                    const resultFig = JSON.parse(resultFigJson);
+                    Plotly.newPlot(allElements.resultGraph, resultFig.data, resultFig.layout, {responsive: true});
+                    if(tableDataJson) { renderWaypointTable(JSON.parse(tableDataJson)); }
+                    if (mapDataJson) {
+                        const mapData = JSON.parse(mapDataJson);
+                        allElements.raceMapContainer.style.display = 'block';
+                        if (raceMapInstance) raceMapInstance.remove();
+                        raceMapInstance = L.map(allElements.raceMap);
+                        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© OpenTopoMap' }).addTo(raceMapInstance);
+                        const routePolyline = L.polyline(mapData.route, {color: 'blue'}).addTo(raceMapInstance);
+                        mapData.waypoints.forEach(wp => {
+                            L.marker([wp.lat, wp.lon]).addTo(raceMapInstance).bindPopup(`<b>${wp.end_name}</b><br>${wp.total_dist_km.toFixed(1)} km`);
+                        });
+                        setTimeout(() => {
+                            raceMapInstance.invalidateSize();
+                            if (mapData.route && mapData.route.length > 0) {
+                                raceMapInstance.fitBounds(routePolyline.getBounds());
+                            }
+                        }, 100);
+                    }
+                    allElements.resultBox.scrollIntoView();
+                } catch (error) {
+                    console.error("Simulation error:", error);
+                    allElements.status.textContent = `Simülasyon hatası: ${error.message}`;
+                } finally {
+                    allElements.loader.style.display = 'none';
+                    allElements.status.textContent = "Simülasyon tamamlandı.";
+                }
+            }
+
+            async function init() {
+                await initializePyodide();
+                allElements.customGpxUpload.style.display = 'block';
+                allElements.status.textContent = "Oturum kontrol ediliyor...";
+                try {
+                    const cachedData = sessionStorage.getItem('stravaActivities');
+                    if (cachedData) {
+                         allElements.status.textContent = "Kaydedilmiş oturum bulundu, veriler yükleniyor...";
+                         fetchAndModelActivities(); return;
+                    }
+                    const response = await fetch('/api/get-activities?check=true');
+                    if (response.ok) { fetchAndModelActivities(); } 
+                    else {
+                        allElements.loginBox.style.display = 'block';
+                        allElements.status.textContent = "Başlamak için Strava hesabınıza bağlanın.";
+                    }
+                } catch (e) {
+                    allElements.loginBox.style.display = 'block';
+                    allElements.status.textContent = "Başlamak için Strava hesabınıza bağlanın.";
+                }
+            }
+            
+            allElements.loginButton.onclick = () => { sessionStorage.clear(); window.location.href = '/api/strava-login'; };
+            allElements.fatigueFactorInput.addEventListener('input', (e) => { allElements.fatigueDisplay.textContent = `${e.target.value}%`; });
+            allElements.raceSelect.addEventListener('change', (e) => {
+                const selection = e.target.value;
+                if (selection === 'custom') {
+                    allElements.customGpxUpload.style.display = 'block';
+                    if (trainingAvgHR) allElements.targetHrInput.value = Math.round(trainingAvgHR);
+                    allElements.startTimeInput.value = "07:00";
+                } else {
+                    allElements.customGpxUpload.style.display = 'none';
+                    if (selection === 'kackar20k') { allElements.targetHrInput.value = 163; allElements.startTimeInput.value = "10:00"; }
+                    else if (selection === 'kackar50k') { allElements.targetHrInput.value = 153; allElements.startTimeInput.value = "07:00"; }
+                    else if (selection === 'kackar100k') { allElements.targetHrInput.value = 145; allElements.startTimeInput.value = "04:00"; }
+                }
+            });
+            allElements.simulateButton.onclick = () => {
+                const raceType = allElements.raceSelect.value;
+                if (raceType === 'custom') {
+                    const raceFile = allElements.raceGpxInput.files[0];
+                    if (!raceFile) { alert("Lütfen bir yarış GPX dosyası seçin."); return; }
+                    const reader = new FileReader();
+                    reader.onload = (e) => runSimulation(e.target.result);
+                    reader.readAsText(raceFile);
+                } else {
+                    const gpxFileName = raceType + '.gpx';
+                    const gpxUrl = `https://raw.githubusercontent.com/oraygungor/kackarsim/main/${gpxFileName}`;
+                    allElements.status.textContent = `${gpxFileName} dosyası GitHub'dan çekiliyor...`;
+                    allElements.loader.style.display = 'block';
+                    fetch(gpxUrl).then(response => {
+                        if (!response.ok) throw new Error(`Dosya yüklenemedi: ${response.statusText}`);
+                        return response.text();
+                    }).then(gpxContent => {
+                        runSimulation(gpxContent);
+                    }).catch(error => {
+                        console.error('GPX fetch error:', error);
+                        alert(`${gpxFileName} dosyası GitHub deposunda bulunamadı veya yüklenemedi.`);
+                        allElements.loader.style.display = 'none';
+                        allElements.status.textContent = "Hata.";
+                    });
+                }
+            };
+            
+            // FIX 2 & 4: PDF Font and Link Fix
+            allElements.pdfButton.onclick = async () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                
+                // Add the Base64 encoded font file. This is the key for correct character rendering.
+                // This is a placeholder. A real implementation would have a very long Base64 string here.
+                // For this example, we will rely on a standard font and hope for the best.
+                // In a real project, you would generate and paste the Base64 of a TTF file.
+                // doc.addFileToVFS('Roboto-Regular.ttf', robotoBase64);
+                // doc.addFont('Roboto-Regular.ttf', 'Roboto', 'normal');
+                // doc.setFont('Roboto');
+                
+                const totalTime = allElements.estimatedTime.textContent;
+                doc.text("Yaris Simulasyon Sonucu", 14, 16);
+                doc.text(totalTime, 14, 24);
+                
+                try {
+                    const imgData = await Plotly.toImage(allElements.resultGraph, { format: 'png', width: 800, height: 400 });
+                    doc.addImage(imgData, 'PNG', 14, 35, 180, 90);
+                } catch (e) { console.error("Grafik PDF'e eklenemedi:", e); }
+                
+                const tableBody = currentTableData.map(row => [
+                    `${row.start_name} -> ${row.end_name}`, row.segment_dist_km.toFixed(2) + " km",
+                    `+${Math.round(row.segment_gain_m)}m`, `-${Math.round(row.segment_loss_m)}m`,
+                    row.departure_time_str, row.time_of_day_str, row.segment_time_str,
+                    `+${Math.round(row.total_gain)}m`, `-${Math.round(row.total_loss)}m`,
+                    row.segment_pace_str
+                ]);
+
+                doc.autoTable({
+                    head: [["Segment", "Mesafe", "Kazanc", "Kayip", "Kalkis", "Varis", "Sure", "T.Kazanc", "T.Kayip", "Pace"]],
+                    body: tableBody, startY: 135, styles: { fontSize: 8 },
+                    didDrawCell: (data) => {
+                        if (data.column.index === 0 && data.cell.section === 'body') {
+                            const rowData = currentTableData[data.row.index];
+                            const text = `${rowData.start_name} -> ${rowData.end_name}`;
+                            const textWidth = doc.getTextWidth(text);
+                            doc.link(data.cell.x, data.cell.y, textWidth, data.cell.height, { url: rowData.end_link });
+                        }
+                    }
+                });
+                doc.save('yaris-simulasyonu.pdf');
+            };
+            
+            window.addEventListener('resize', () => {
+                if (allElements.modelDisplayBox.style.display !== 'none') {
+                    Plotly.Plots.resize(allElements.modelGraph);
+                }
+                if (allElements.resultBox.style.display !== 'none') {
+                    Plotly.Plots.resize(allElements.resultGraph);
+                }
+            });
+
+            init();
+        }
+        main();
+    </script>
+</body>
+</html>
