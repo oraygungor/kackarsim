@@ -112,7 +112,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Gelişmiş Strava Yarış Simülatörü v10</h1>
+        <h1>Gelişmiş Strava Yarış Simülatörü v12</h1>
         
         <div class="box" id="login-box">
             <h2>Adım 1: Strava Hesabınıza Bağlanın</h2>
@@ -155,7 +155,7 @@
                            <label for="fatigue-factor">Her 10 "Ayarlanmış KM"de Performans Düşüşü:</label>
                            <div class="description">(Ayarlanmış KM = Mesafe(km) + Tırmanış(m)/100)</div>
                            <div class="slider-container" style="margin-top: 5px;">
-                               <input type="range" id="fatigue-factor" value="5" min="0" max="50">
+                               <input type="range" id="fatigue-factor" value="9" min="0" max="50">
                                <span id="fatigue-display">5%</span>
                            </div>
                         </div>
@@ -327,11 +327,21 @@ def simulate_race(race_gpx_string, poly_coeffs, fatigue_percent, hr_adjustment_f
             ele_delta = current_point.elevation - prev_point.elevation
             if ele_delta > 0: total_gain += ele_delta
             else: total_loss -= ele_delta
+
+            
         current_adjusted_km = (cumulative_dist_m / 1000.0) + (total_gain / 100.0)
         current_milestone_count = int(current_adjusted_km // adjusted_km_fatigue_step)
-        if current_milestone_count > last_adjusted_km_milestone:
-            fatigue_factor *= (1 + fatigue_percent / 100)
-            last_adjusted_km_milestone = current_milestone_count
+
+        
+  while last_adjusted_km_milestone < current_milestone_count:
+    milestone_index = last_adjusted_km_milestone + 1   # 1,2,3,...
+    # İlkinde %fatigue_percent, sonra % (fatigue_percent-1), ... 1'e kadar; sonrası 0
+    step_drop_percent = max(fatigue_percent - (milestone_index - 1), 0)
+    if step_drop_percent > 0:
+        fatigue_factor *= (1.0 + step_drop_percent / 100.0)
+    # step_drop_percent 0 ise artık ek düşüş yok
+    last_adjusted_km_milestone += 1
+            
         if cumulative_segment_dist >= segment_length:
             segment_ele_delta = current_point.elevation - segment_start_point.elevation if current_point.elevation and segment_start_point.elevation else 0
             slope = (segment_ele_delta / cumulative_segment_dist) * 100 if cumulative_segment_dist > 0 else 0
